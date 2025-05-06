@@ -1,87 +1,68 @@
-const express = require("express");
-const http = require("http");
-const { Server } = require("socket.io");
-
-const app = express();
-const server = http.createServer(app);
-
-// ✅ CORS autorisé pour Netlify et debug local
-const io = new Server(server, {
-  cors: {
-    origin: "*", // ou remplace par "https://wormz.master3d.net" pour prod sécurisée
-    methods: ["GET", "POST"]
-  }
-});
-
-// ✅ Route test pour Fly.io
-app.get("/", (req, res) => {
-  res.send("MIS WORMZ BACKEND IS RUNNING!");
-});
-
-// 🌐 Game logic
-
-let players = {};
-let maxPlayers = 40;
-
-io.on("connection", (socket) => {
-  console.log("🟢 New connection:", socket.id);
-
-  // Refuse si trop de joueurs
-  if (Object.keys(players).length >= maxPlayers) {
-    socket.emit("server_full");
-    socket.disconnect();
-    return;
-  }
-
-  // Nouveau joueur
-  socket.on("new_player", (data) => {
-    players[socket.id] = {
-      username: data.username,
-      x: Math.random() * 1000,
-      y: Math.random() * 1000,
-      size: 10,
-      lastMove: Date.now()
-    };
-    console.log(`👾 Player joined: ${data.username} (${socket.id})`);
-
-    socket.emit("init", { id: socket.id, players });
-    socket.broadcast.emit("player_joined", { id: socket.id, player: players[socket.id] });
-  });
-
-  // Mouvement
-  socket.on("move", (data) => {
-    if (players[socket.id]) {
-      players[socket.id].x = data.x;
-      players[socket.id].y = data.y;
-      players[socket.id].lastMove = Date.now();
-      socket.broadcast.emit("player_moved", { id: socket.id, x: data.x, y: data.y });
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MIS WORMZ 🐍</title>
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: #111;
+      color: #eee;
+      font-family: 'Courier New', Courier, monospace;
+      overflow: hidden;
     }
-  });
 
-  // Déconnexion
-  socket.on("disconnect", () => {
-    console.log("🔴 Disconnected:", socket.id);
-    delete players[socket.id];
-    socket.broadcast.emit("player_left", { id: socket.id });
-  });
-});
-
-// 💤 Kick les joueurs AFK toutes les 30 sec
-setInterval(() => {
-  const now = Date.now();
-  for (let id in players) {
-    if (now - players[id].lastMove > 30000) {
-      console.log("💤 Kicking AFK:", id);
-      io.to(id).emit("afk_kick");
-      io.sockets.sockets.get(id)?.disconnect();
-      delete players[id];
-      io.emit("player_left", { id });
+    #menu {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      text-align: center;
     }
-  }
-}, 30000);
 
-// 🚀 Serveur en ligne
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`✅ MIS WORMZ BACKEND ONLINE on port ${PORT}`);
-});
+    input {
+      padding: 10px;
+      font-size: 18px;
+      border: none;
+      border-radius: 5px;
+      margin-bottom: 10px;
+    }
+
+    button {
+      padding: 10px 20px;
+      font-size: 18px;
+      background: #0f0;
+      color: #000;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+
+    button:hover {
+      background: #0c0;
+    }
+
+    canvas {
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div id="menu">
+    <h1>MIS WORMZ 🐍</h1>
+    <p>Entre ton pseudo :</p>
+    <input type="text" id="usernameInput" placeholder="ex: KingWorm" />
+    <br />
+    <button id="playButton">Play</button>
+  </div>
+
+  <canvas id="gameCanvas"></canvas>
+
+  <!-- Socket.IO -->
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <!-- Ton script principal -->
+  <script src="main.js"></script>
+</body>
+</html>
