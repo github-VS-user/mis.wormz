@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>MIS WORMZ</title>
+  <style>
+    html, body {
+      margin: 0; padding: 0;
+      background: #111;
+      overflow: hidden;
+      color: #eee;
+      font-family: sans-serif;
+    }
+    #usernameInput {
+      position: absolute;
+      top: 50%; left: 50%;
+      transform: translate(-50%, -50%);
+      background: #222;
+      padding: 20px;
+      border-radius: 10px;
+      text-align: center;
+    }
+    canvas { display: block; }
+  </style>
+</head>
+<body>
+  <div id="usernameInput">
+    <h2>Enter your worm name 🐍</h2>
+    <input id="name" />
+    <button onclick="startGame()">Play</button>
+  </div>
+  <canvas id="gameCanvas"></canvas>
+
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script>
+    const canvas = document.getElementById("gameCanvas");
+    const ctx = canvas.getContext("2d");
+    canvas.width = window.innerWidth;
+    canvas.height = window.innerHeight;
+
+    let socket;
+    let players = {};
+    let food = [];
+    let myId = null;
+    let lastInputTime = Date.now();
+
+    function startGame() {
+      const username = document.getElementById("name").value.trim();
+      if (!username) return;
+      document.getElementById("usernameInput").style.display = "none";
+
+      socket = io("https://miswormz.fly.dev"); // Change to your Fly.io app domain
+      socket.emit("newPlayer", { username });
+
+      socket.on("init", (id) => {
+        myId = id;
+      });
+
+      socket.on("state", (data) => {
+        players = data.players;
+        food = data.food;
+      });
+
+      socket.on("full", () => {
+        alert("Serveur plein (40 joueurs max)");
+        location.reload();
+      });
+
+      window.addEventListener("keydown", () => lastInputTime = Date.now());
+      window.addEventListener("mousemove", () => lastInputTime = Date.now());
+
+      gameLoop();
+      setInterval(() => {
+        socket.emit("input", { x: mouse.x, y: mouse.y });
+      }, 40);
+    }
+
+    let mouse = { x: canvas.width / 2, y: canvas.height / 2 };
+    window.onmousemove = (e) => {
+      mouse.x = e.clientX;
+      mouse.y = e.clientY;
+    };
+
+    function gameLoop() {
+      ctx.fillStyle = "#111";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      food.forEach(f => {
+        ctx.fillStyle = "#0f0";
+        ctx.beginPath();
+        ctx.arc(f.x, f.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+      });
+
+      for (let id in players) {
+        const p = players[id];
+        ctx.fillStyle = id === myId ? "#f00" : "#999";
+        p.body.forEach((seg, i) => {
+          ctx.beginPath();
+          ctx.arc(seg.x, seg.y, 8, 0, Math.PI * 2);
+          ctx.fill();
+        });
+
+        // Username
+        ctx.fillStyle = "#fff";
+        ctx.font = "12px Arial";
+        ctx.textAlign = "center";
+        ctx.fillText(p.username, p.body[0].x, p.body[0].y - 15);
+      }
+
+      requestAnimationFrame(gameLoop);
+    }
+  </script>
+</body>
+</html>
