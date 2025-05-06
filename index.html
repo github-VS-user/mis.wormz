@@ -1,116 +1,87 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>MIS WORMZ</title>
-  <style>
-    html, body {
-      margin: 0; padding: 0;
-      background: #111;
-      overflow: hidden;
-      color: #eee;
-      font-family: sans-serif;
-    }
-    #usernameInput {
-      position: absolute;
-      top: 50%; left: 50%;
-      transform: translate(-50%, -50%);
-      background: #222;
-      padding: 20px;
-      border-radius: 10px;
-      text-align: center;
-    }
-    canvas { display: block; }
-  </style>
-</head>
-<body>
-  <div id="usernameInput">
-    <h2>Enter your worm name 🐍</h2>
-    <input id="name" />
-    <button onclick="startGame()">Play</button>
-  </div>
-  <canvas id="gameCanvas"></canvas>
+const express = require("express");
+const http = require("http");
+const { Server } = require("socket.io");
 
-  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
-  <script>
-    const canvas = document.getElementById("gameCanvas");
-    const ctx = canvas.getContext("2d");
-    canvas.width = window.innerWidth;
-    canvas.height = window.innerHeight;
+const app = express();
+const server = http.createServer(app);
 
-    let socket;
-    let players = {};
-    let food = [];
-    let myId = null;
-    let lastInputTime = Date.now();
+// ✅ CORS autorisé pour Netlify et debug local
+const io = new Server(server, {
+  cors: {
+    origin: "*", // ou remplace par "https://wormz.master3d.net" pour prod sécurisée
+    methods: ["GET", "POST"]
+  }
+});
 
-    function startGame() {
-      const username = document.getElementById("name").value.trim();
-      if (!username) return;
-      document.getElementById("usernameInput").style.display = "none";
+// ✅ Route test pour Fly.io
+app.get("/", (req, res) => {
+  res.send("MIS WORMZ BACKEND IS RUNNING!");
+});
 
-      socket = io("https://miswormz.fly.dev"); // Change to your Fly.io app domain
-      socket.emit("newPlayer", { username });
+// 🌐 Game logic
 
-      socket.on("init", (id) => {
-        myId = id;
-      });
+let players = {};
+let maxPlayers = 40;
 
-      socket.on("state", (data) => {
-        players = data.players;
-        food = data.food;
-      });
+io.on("connection", (socket) => {
+  console.log("🟢 New connection:", socket.id);
 
-      socket.on("full", () => {
-        alert("Serveur plein (40 joueurs max)");
-        location.reload();
-      });
+  // Refuse si trop de joueurs
+  if (Object.keys(players).length >= maxPlayers) {
+    socket.emit("server_full");
+    socket.disconnect();
+    return;
+  }
 
-      window.addEventListener("keydown", () => lastInputTime = Date.now());
-      window.addEventListener("mousemove", () => lastInputTime = Date.now());
-
-      gameLoop();
-      setInterval(() => {
-        socket.emit("input", { x: mouse.x, y: mouse.y });
-      }, 40);
-    }
-
-    let mouse = { x: canvas.width / 2, y: canvas.height / 2 };
-    window.onmousemove = (e) => {
-      mouse.x = e.clientX;
-      mouse.y = e.clientY;
+  // Nouveau joueur
+  socket.on("new_player", (data) => {
+    players[socket.id] = {
+      username: data.username,
+      x: Math.random() * 1000,
+      y: Math.random() * 1000,
+      size: 10,
+      lastMove: Date.now()
     };
+    console.log(`👾 Player joined: ${data.username} (${socket.id})`);
 
-    function gameLoop() {
-      ctx.fillStyle = "#111";
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
+    socket.emit("init", { id: socket.id, players });
+    socket.broadcast.emit("player_joined", { id: socket.id, player: players[socket.id] });
+  });
 
-      food.forEach(f => {
-        ctx.fillStyle = "#0f0";
-        ctx.beginPath();
-        ctx.arc(f.x, f.y, 5, 0, Math.PI * 2);
-        ctx.fill();
-      });
-
-      for (let id in players) {
-        const p = players[id];
-        ctx.fillStyle = id === myId ? "#f00" : "#999";
-        p.body.forEach((seg, i) => {
-          ctx.beginPath();
-          ctx.arc(seg.x, seg.y, 8, 0, Math.PI * 2);
-          ctx.fill();
-        });
-
-        // Username
-        ctx.fillStyle = "#fff";
-        ctx.font = "12px Arial";
-        ctx.textAlign = "center";
-        ctx.fillText(p.username, p.body[0].x, p.body[0].y - 15);
-      }
-
-      requestAnimationFrame(gameLoop);
+  // Mouvement
+  socket.on("move", (data) => {
+    if (players[socket.id]) {
+      players[socket.id].x = data.x;
+      players[socket.id].y = data.y;
+      players[socket.id].lastMove = Date.now();
+      socket.broadcast.emit("player_moved", { id: socket.id, x: data.x, y: data.y });
     }
-  </script>
-</body>
-</html>
+  });
+
+  // Déconnexion
+  socket.on("disconnect", () => {
+    console.log("🔴 Disconnected:", socket.id);
+    delete players[socket.id];
+    socket.broadcast.emit("player_left", { id: socket.id });
+  });
+});
+
+// 💤 Kick les joueurs AFK toutes les 30 sec
+setInterval(() => {
+  const now = Date.now();
+  for (let id in players) {
+    if (now - players[id].lastMove > 30000) {
+      console.log("💤 Kicking AFK:", id);
+      io.to(id).emit("afk_kick");
+      io.sockets.sockets.get(id)?.disconnect();
+      delete players[id];
+      io.emit("player_left", { id });
+    }
+  }
+}, 30000);
+
+// 🚀 Serveur en ligne
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`✅ MIS WORMZ BACKEND ONLINE on port ${PORT}`);
+});
